@@ -1,0 +1,99 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: expose-tunnel-db
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 4Gi
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: expose-tunnel
+  labels:
+    app: expose-tunnel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: expose-tunnel
+  template:
+    metadata:
+      labels:
+        app: expose-tunnel
+    spec:
+      volumes:
+        - name: db-vol
+          persistentVolumeClaim:
+            claimName: expose-tunnel-db
+      containers:
+        - name: expose
+          image: ghcr.io/beyondcode/expose/expose-server:1.3.2
+          volumeMounts:
+            - mountPath: /root/.expose
+              name: db-vol
+          env:
+            - name: port
+              value: "8080"
+            - name: domain
+              value: share.phroggyy.dev
+            - name: username
+              valueFrom:
+                secretKeyRef:
+                  name: expose-auth
+                  key: username
+            - name: password
+              valueFrom:
+                secretKeyRef:
+                  name: expose-auth
+                  key: password
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: expose-tunnel
+spec:
+  selector:
+    app: expose-tunnel
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+---
+kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  name: expose-tunnel
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: share.phroggyy.dev
+      http:
+        paths:
+          - backend:
+              service:
+                name: expose-tunnel
+                port:
+                  number: 80
+            path: /
+            pathType: Prefix
+    - host: "*.share.phroggyy.dev"
+      http:
+        paths:
+          - backend:
+              service:
+                name: expose-tunnel
+                port:
+                  number: 80
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+      - share.phroggyy.dev
+      - "*.share.phroggyy.dev"
+      secretName: share.phroggyy.dev-tls
